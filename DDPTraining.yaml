@@ -6,17 +6,17 @@ Parameters:
 
   KeyName:
     Type: AWS::EC2::KeyPair::KeyName
-    Default: ddp_g4dn_xlarge_rsa_key
+    # Default: ddp_g4dn_xlarge_rsa_key
     Description: Name of an existing EC2 KeyPair
 
   SubnetId:
     Type: AWS::EC2::Subnet::Id
-    Default: subnet-00afb40cacc903083
+    # Default: subnet-00afb40cacc903083
     Description: Subnet ID for the EC2 instances
 
   VPCId:
     Type: AWS::EC2::VPC::Id
-    Default: vpc-0bf87f581effeb522
+    # Default: vpc-0bf87f581effeb522
     Description: VPC ID where the instances will be launched
 
   DesiredCapacity:
@@ -38,26 +38,8 @@ Resources:
             Action:
               - sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AmazonSSMFullAccess
-
-  TrainingNodePolicy:
-    Type: AWS::IAM::Policy
-    Properties:
-      PolicyName: TrainingNodePolicy
-      Roles:
-        - !Ref TrainingNodeRole
-      PolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Action:
-              - s3:GetObject
-            Resource: "arn:aws:s3:::your-bucket-name/*"
-          - Effect: Allow
-            Action:
-              - ssm:GetParameter
-              - ssm:PutParameter
-            Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/distributed-training/*"
+        - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess  # Adjust as necessary
+        - arn:aws:iam::aws:policy/AmazonSSMFullAccess  # Consider creating a custom policy for least privilege
 
   TrainingNodeInstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -65,25 +47,58 @@ Resources:
       Roles:
         - !Ref TrainingNodeRole
 
+  TrainingNodeSSMPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: TrainingNodeSSMPolicy
+      Roles:
+        - !Ref TrainingNodeRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - ssm:PutParameter
+              - ssm:GetParameter
+            Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/distributed-training/*"
+
   TrainingSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Allow SSH and DDP communication
       VpcId: !Ref VPCId
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 22
-          ToPort: 22
-          CidrIp: x.x.x.x/32  # Replace with your IP range
-        - IpProtocol: tcp
-          FromPort: 29500
-          ToPort: 29500
-          CidrIp: 0.0.0.0/0  # Replace with a more restrictive range if possible
+      # SecurityGroupIngress:
+      #   - IpProtocol: tcp
+      #     FromPort: 22
+      #     ToPort: 22
+      #     CidrIp: x.x.x.x/32  # Replace with your IP range
+      #   - IpProtocol: tcp
+      #     FromPort: 29500
+      #     ToPort: 29500
+      #     CidrIp: 0.0.0.0/0  # Replace with a more restrictive range if possible
       SecurityGroupEgress:
         - IpProtocol: -1
           FromPort: -1
           ToPort: -1
           CidrIp: 0.0.0.0/0
+
+  SSHIngressRule:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref TrainingSecurityGroup
+      IpProtocol: tcp
+      FromPort: 22
+      ToPort: 22
+      CidrIp: 0.0.0.0/0  # Replace with your IP range for SSH access
+
+  DDPIngressRule:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref TrainingSecurityGroup
+      IpProtocol: tcp
+      FromPort: 29500
+      ToPort: 29500
+      SourceSecurityGroupId: !Ref TrainingSecurityGroup
 
   TrainingNodeLaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
@@ -100,14 +115,15 @@ Resources:
         BlockDeviceMappings:
           - DeviceName: "/dev/sda1"
             Ebs:
-              VolumeSize: 200  # Specify the volume size in GB (e.g., 100GB)
-              VolumeType: gp3  # General Purpose SSD (gp3) or gp2
-              DeleteOnTermination: true  # Automatically delete the volume when the instance is terminated
+              VolumeSize: 200
+              VolumeType: gp3
+              DeleteOnTermination: true
+              Encrypted: true
         UserData:
           Fn::Base64: !Sub |
             #!/bin/bash
             set -euxo pipefail
-            LOG_FILE="/home/ubuntu/init.log"
+            LOG_FILE="/var/log/cloud-init-output.log"
             exec > >(tee -a $LOG_FILE | logger -t user-data -s 2>/dev/console) 2>&1
 
             # Update and upgrade system packages
@@ -118,7 +134,7 @@ Resources:
             python3 -m pip install --upgrade pip setuptools
             python3 -m pip install --user virtualenv
 
-            # Run the rest of the script as ubuntu user
+            # Switch to ubuntu user
             sudo -i -u ubuntu bash << EOF
             set -euxo pipefail
             cd /home/ubuntu
@@ -150,11 +166,9 @@ Resources:
             export MASTER_PORT=29500
 
             if [ "\$RANK" -eq "0" ]; then
-              # Master node writes its IP to SSM Parameter Store
               aws ssm put-parameter --name "/distributed-training/master-ip" --type "String" --value "\$PRIVATE_IP" --overwrite --region ${AWS::Region}
               export MASTER_ADDR="\$PRIVATE_IP"
             else
-              # Wait for the master IP to be available
               until [ -n "\$MASTER_ADDR" ]; do
                 MASTER_ADDR=\$(aws ssm get-parameter --name "/distributed-training/master-ip" --query "Parameter.Value" --output text --region ${AWS::Region} || echo "")
                 sleep 5
