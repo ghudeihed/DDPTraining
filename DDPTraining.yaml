@@ -1,7 +1,7 @@
 Parameters:
   ImageId:
     Type: AWS::EC2::Image::Id
-    Default: ami-0852de09092f3a061
+    Default: ami-0cc4f966c42265b29
     Description: AMI ID for the EC2 instance
 
   KeyName:
