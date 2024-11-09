@@ -96,6 +96,12 @@ Resources:
           - !Ref TrainingSecurityGroup
         IamInstanceProfile:
           Arn: !GetAtt TrainingNodeInstanceProfile.Arn
+        BlockDeviceMappings:
+          - DeviceName: "/dev/sda1"
+            Ebs:
+              VolumeSize: 200  # Specify the volume size in GB (e.g., 100GB)
+              VolumeType: gp3  # General Purpose SSD (gp3) or gp2
+              DeleteOnTermination: true  # Automatically delete the volume when the instance is terminated
         UserData:
           Fn::Base64: !Sub |
             #!/bin/bash
@@ -130,7 +136,7 @@ Resources:
             cd DDPTraining
 
             # Install dependencies using Poetry
-            poetry config virtualenvs.create false  # Use the existing virtual environment
+            poetry config virtualenvs.create true
             poetry install
 
             # Verify PyTorch installation
