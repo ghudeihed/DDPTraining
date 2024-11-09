@@ -8,9 +8,10 @@ Parameters:
     Type: AWS::EC2::KeyPair::KeyName
     Description: Name of an existing EC2 KeyPair
 
-  SecurityGroupId:
-    Type: AWS::EC2::SecurityGroup::Id
-    Description: Security Group ID for the EC2 instances
+  # Remove this parameter since we'll define the security group within the template
+  # SecurityGroupId:
+  #   Type: AWS::EC2::SecurityGroup::Id
+  #   Description: Security Group ID for the EC2 instances
 
   SubnetId:
     Type: AWS::EC2::Subnet::Id
@@ -40,7 +41,7 @@ Resources:
               - sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess  # Adjust as necessary
-        - arn:aws:iam::aws:policy/AmazonSSMFullAccess
+        - arn:aws:iam::aws:policy/AmazonSSMFullAccess  # Consider creating a custom policy for least privilege
 
   TrainingNodeInstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -68,20 +69,29 @@ Resources:
     Properties:
       GroupDescription: Allow SSH and DDP communication
       VpcId: !Ref VPCId
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 22
-          ToPort: 22
-          CidrIp: 0.0.0.0/0  # Replace with your IP range
-        - IpProtocol: tcp
-          FromPort: 29500
-          ToPort: 29500
-          SourceSecurityGroupId: !Ref TrainingSecurityGroup
       SecurityGroupEgress:
         - IpProtocol: -1
           FromPort: -1
           ToPort: -1
           CidrIp: 0.0.0.0/0
+
+  SSHIngressRule:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref TrainingSecurityGroup
+      IpProtocol: tcp
+      FromPort: 22
+      ToPort: 22
+      CidrIp: 0.0.0.0/0  # Replace with your IP range for SSH access
+
+  DDPIngressRule:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref TrainingSecurityGroup
+      IpProtocol: tcp
+      FromPort: 29500
+      ToPort: 29500
+      SourceSecurityGroupId: !Ref TrainingSecurityGroup
 
   TrainingNodeLaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
