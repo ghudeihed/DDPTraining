@@ -109,38 +109,52 @@ Resources:
           Fn::Base64: !Sub |
             #!/bin/bash
             set -e
+            # Install necessary packages (if any)
+            apt-get update && apt-get install -y package-name
+
+            # Run the rest of the script as ubuntu user
+            sudo -i -u ubuntu bash << EOF
+            set -e
             cd /home/ubuntu
+
             # Install Poetry
             curl -sSL https://install.python-poetry.org | python3 -
-            # Update PATH for the current session
             export PATH="/home/ubuntu/.local/bin:$PATH"
             echo 'export PATH="/home/ubuntu/.local/bin:$PATH"' >> /home/ubuntu/.bashrc
+
             # Clone your repository
             git clone https://github.com/ghudeihed/DDPTraining.git
             cd DDPTraining
+
             # Install dependencies using Poetry
             poetry install
+
             # Activate the Poetry environment
-            source $(poetry env info --path)/bin/activate
+            source \$(poetry env info --path)/bin/activate
+
             # Distributed training configuration
             export WORLD_SIZE=${DesiredCapacity}
-            export RANK=$(curl -s http://169.254.169.254/latest/meta-data/ami-launch-index)
-            export PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
+            export RANK=\$(curl -s http://169.254.169.254/latest/meta-data/ami-launch-index)
+            export PRIVATE_IP=\$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
             export MASTER_PORT=29500
-            if [ "$RANK" -eq "0" ]; then
+
+            if [ "\$RANK" -eq "0" ]; then
               # Master node writes its IP to SSM Parameter Store
-              aws ssm put-parameter --name "/distributed-training/master-ip" --type "String" --value "$PRIVATE_IP" --overwrite --region ${AWS::Region}
-              export MASTER_ADDR="$PRIVATE_IP"
+              aws ssm put-parameter --name "/distributed-training/master-ip" --type "String" --value "\$PRIVATE_IP" --overwrite --region ${AWS::Region}
+              export MASTER_ADDR="\$PRIVATE_IP"
             else
               # Wait for the master IP to be available
-              until [ -n "$MASTER_ADDR" ]; do
-                MASTER_ADDR=$(aws ssm get-parameter --name "/distributed-training/master-ip" --query "Parameter.Value" --output text --region ${AWS::Region} || echo "")
+              until [ -n "\$MASTER_ADDR" ]; do
+                MASTER_ADDR=\$(aws ssm get-parameter --name "/distributed-training/master-ip" --query "Parameter.Value" --output text --region ${AWS::Region} || echo "")
                 sleep 5
               done
               export MASTER_ADDR
             fi
+
             # Run your training script
             nohup poetry run python train.py > /home/ubuntu/train.log 2>&1 &
+            EOF
+
 
   TrainingNodeAutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
