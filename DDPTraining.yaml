@@ -6,6 +6,7 @@ Parameters:
 
   KeyName:
     Type: AWS::EC2::KeyPair::KeyName
+    Default: ddp_g4dn_xlarge_rsa_key
     Description: Name of an existing EC2 KeyPair
 
   SubnetId:
