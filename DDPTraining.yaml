@@ -109,28 +109,40 @@ Resources:
           Fn::Base64: !Sub |
             #!/bin/bash
             set -e
-            # Install necessary packages (if any)
-            apt-get update && apt-get install -y package-name
+
+            # Update and upgrade system packages
+            apt-get update
+            apt-get upgrade -y
+
+            # Install pip and virtualenv
+            apt-get install -y python3-pip
+            python3 -m pip install --upgrade pip setuptools
+            python3 -m pip install --user virtualenv
 
             # Run the rest of the script as ubuntu user
             sudo -i -u ubuntu bash << EOF
             set -e
             cd /home/ubuntu
 
+            # Create and activate a virtual environment
+            python3 -m virtualenv ddp_env
+            source ddp_env/bin/activate
+
             # Install Poetry
             curl -sSL https://install.python-poetry.org | python3 -
-            export PATH="/home/ubuntu/.local/bin:$PATH"
-            echo 'export PATH="/home/ubuntu/.local/bin:$PATH"' >> /home/ubuntu/.bashrc
+            export PATH="/home/ubuntu/.local/bin:\$PATH"
+            echo 'export PATH="/home/ubuntu/.local/bin:\$PATH"' >> /home/ubuntu/.bashrc
 
             # Clone your repository
             git clone https://github.com/ghudeihed/DDPTraining.git
             cd DDPTraining
 
             # Install dependencies using Poetry
+            poetry config virtualenvs.create false  # Use the existing virtual environment
             poetry install
 
-            # Activate the Poetry environment
-            source \$(poetry env info --path)/bin/activate
+            # Verify PyTorch installation
+            python -c "import torch; print(f'PyTorch version: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}'); print(f'CUDA version: {torch.version.cuda}')"
 
             # Distributed training configuration
             export WORLD_SIZE=${DesiredCapacity}
@@ -154,7 +166,6 @@ Resources:
             # Run your training script
             nohup poetry run python train.py > /home/ubuntu/train.log 2>&1 &
             EOF
-
 
   TrainingNodeAutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
